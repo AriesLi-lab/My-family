@@ -18,9 +18,10 @@
     
     <!-- ==================== 顶部实时云同步控制台 ==================== -->
     <div class="bg-gray-900 text-white text-[11px] px-4 py-2.5 flex justify-between items-center z-50 shrink-0 shadow-sm">
-        <div class="flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full" :class="isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'"></span>
-            <span class="font-mono text-gray-300">同步码: {{ syncId || '正在连接云空间...' }}</span>
+        <div class="flex items-center gap-1.5 cursor-pointer" @click="showNetworkError">
+            <span class="w-2 h-2 rounded-full" :class="syncError ? 'bg-red-500' : (isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-green-400')"></span>
+            <span v-if="syncError" class="font-mono text-red-400 underline">❌ 连接失败(点击看原因)</span>
+            <span v-else class="font-mono text-gray-300">同步码: {{ syncId || '正在连接云空间...' }}</span>
         </div>
         <div class="flex gap-2">
             <button @click="copySyncId" class="bg-orange-500 px-2 py-0.5 rounded text-white active:scale-95">分享家人</button>
@@ -56,7 +57,7 @@
             <div class="w-10"></div>
         </div>
 
-        <!-- 状态一：折叠周视图 -->
+        <!-- 折叠周视图 -->
         <div v-if="!isCalendarExpanded" class="flex justify-between text-center px-1">
             <div v-for="day in weekDays" :key="day.dateString" @click="selectDate(day.dateString)"
                  class="flex flex-col items-center w-10 py-1 rounded-full cursor-pointer"
@@ -66,7 +67,7 @@
             </div>
         </div>
 
-        <!-- 状态二：展开月视图 -->
+        <!-- 展开月视图 -->
         <div v-else class="space-y-2">
             <div class="flex justify-between items-center px-4 text-xs opacity-80">
                 <button @click.stop="prevMonth">◀ 上个月</button>
@@ -112,7 +113,7 @@
         </div>
     </div>
 
-    <!-- 弹窗：添加任务编辑弹窗 -->
+    <!-- 弹窗：添加任务 -->
     <div v-if="showTaskModal" class="fixed inset-0 bg-black/40 flex items-end justify-center z-50" @click.self="showTaskModal = false">
         <div class="bg-white w-full max-w-md rounded-t-[24px] p-6 space-y-6 pb-8">
             <div class="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
@@ -143,10 +144,7 @@
         <div class="flex-1 overflow-y-auto p-4 pb-24">
             <div class="grid grid-cols-2 gap-3">
                 <div v-for="dish in filteredDishes" :key="dish.id" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 flex flex-col relative">
-                    
-                    <!-- 右上角小删除按钮 -->
                     <button @click.stop="deleteDish(dish.id)" class="absolute top-2 right-2 bg-black/40 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center z-30">✕</button>
-                    
                     <img :src="dish.image" class="w-full h-24 object-cover bg-gray-100">
                     <div class="p-3 flex items-center justify-between gap-1 flex-1">
                         <span class="text-xs font-bold text-gray-800 truncate">{{ dish.name }}</span>
@@ -159,10 +157,8 @@
             </div>
         </div>
 
-        <!-- 悬浮按钮：添加新菜品 -->
         <button @click="switchView('menu_add')" class="absolute right-5 bottom-20 bg-orange-500 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-2xl font-bold z-20 active:scale-95 transition-transform">＋</button>
 
-        <!-- 底部通栏悬浮确认栏 -->
         <div class="absolute bottom-3 left-4 right-4 bg-white rounded-full shadow-md px-4 py-2 flex items-center justify-between border border-gray-100 z-30">
             <div class="flex items-center gap-1.5">
                 <span class="text-xl">🐶</span>
@@ -198,7 +194,6 @@
     <div v-if="currentView === 'menu_add'" class="flex-1 bg-white flex flex-col p-4 animate-fade-in">
         <div class="flex items-center mb-6 shrink-0"><button @click="switchView('menu_home')" class="text-gray-500 text-sm">〈 返回</button></div>
         <div class="flex-1 space-y-6 overflow-y-auto pb-4">
-            <!-- 上传框 -->
             <div @click="$refs.fileInput.click()" class="w-full aspect-video bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 flex items-center justify-center cursor-pointer overflow-hidden relative">
                 <img v-if="newDishImage" :src="newDishImage" class="w-full h-full object-cover">
                 <span v-else class="text-3xl text-gray-300 font-light">＋</span>
@@ -220,7 +215,7 @@
 </div>
 
 <script>
-const { createApp, ref, computed, onMounted, watch } = Vue;
+const { createApp, ref, computed, onMounted } = Vue;
 
 createApp({
     setup() {
@@ -232,8 +227,8 @@ createApp({
 
         const syncId = ref(localStorage.getItem('f_sync_id') || '');
         const isSyncing = ref(false);
+        const syncError = ref(''); // 错误探测器
 
-        // 氛围感女性头像
         const avatarMap = {
             '阿悦': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=150&q=80',
             '阿冰': 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80'
@@ -247,8 +242,14 @@ createApp({
         ]);
         const menuSelections = ref({});
 
-        // --- 云端网络同步架构 ---
+        // --- 云端同步核心逻辑（带故障排查） ---
         async function initCloudSync() {
+            // 阻断检查：如果是以本地文件形式打开，直接报错
+            if (window.location.protocol === 'file:') {
+                syncError.value = "本地文件安全限制：请确保将此网页上传到了 GitHub Pages 网址打开，直接双击运行 HTML 文件无法连接云端。";
+                return;
+            }
+
             if (!syncId.value) {
                 try {
                     const res = await fetch('https://api.restfulapi.dev/objects', {
@@ -256,19 +257,24 @@ createApp({
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: "FamilySyncSpace", data: { tasks: [], dishes: dishes.value, menuSelections: {} } })
                     });
+                    if(!res.ok) throw new Error("服务器返回错误: " + res.status);
                     const resData = await res.json();
                     if(resData.id) {
                         syncId.value = 'sync-' + resData.id;
                         localStorage.setItem('f_sync_id', syncId.value);
+                        syncError.value = ''; // 清除错误
                     }
-                } catch(e) { console.error("网络初始化失败", e); }
+                } catch(e) { 
+                    console.error(e);
+                    syncError.value = "无法连接至免费云服务器，这通常是因为国内网络防火墙拦截、或者当前处于微信内部浏览器。请尝试切换手机4G/5G网络，或在手机自带浏览器（Safari/Chrome）中打开此网页网址。原因为：" + e.message;
+                }
             }
             pullFromCloud();
             setInterval(pullFromCloud, 5000);
         }
 
         async function pullFromCloud() {
-            if (!syncId.value || isSyncing.value) return;
+            if (!syncId.value || isSyncing.value || syncError.value) return;
             const cleanId = syncId.value.replace('sync-', '');
             try {
                 const res = await fetch(`https://api.restfulapi.dev/objects/${cleanId}`);
@@ -283,7 +289,7 @@ createApp({
         }
 
         async function pushToCloud() {
-            if (!syncId.value) return;
+            if (!syncId.value || syncError.value) return;
             isSyncing.value = true;
             const cleanId = syncId.value.replace('sync-', '');
             try {
@@ -296,24 +302,29 @@ createApp({
             finally { isSyncing.value = false; }
         }
 
-        // 双层保险复制函数实现：防止非HTTPS或微信浏览器假死
+        function showNetworkError() {
+            if (syncError.value) {
+                alert(syncError.value);
+            }
+        }
+
         function copySyncId() {
-            if(!syncId.value || syncId.value.includes('正在')) {
-                alert('家庭同步空间正在创建中，请稍微等待 3 秒再点击哦！');
+            if (syncError.value) {
+                alert("当前处于离线状态，原因：\n" + syncError.value);
                 return;
             }
-            
-            // 尝试标准的剪贴板 API 复制
+            if(!syncId.value) {
+                alert('家庭同步空间正在连接/创建中，请稍微等待 3 秒再试！');
+                return;
+            }
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(syncId.value).then(() => {
                     alert(`专属同步码已自动复制：\n${syncId.value}\n\n您可以去微信直接粘贴发送给家人了！`);
                 }).catch(() => {
-                    // 降级保护：如果自动复制因权限被浏览器拦截
-                    prompt("自动复制失败（浏览器安全限制），请长按下方文字手动复制发送给家人：", syncId.value);
+                    prompt("请长按下方文字手动复制同步码：", syncId.value);
                 });
             } else {
-                // 环境降级保护：如果浏览器不支持复制API（如非HTTPS环境或旧版webview）
-                prompt("请长按下方文字手动复制同步码发送给家人：", syncId.value);
+                prompt("请长按下方文字手动复制同步码：", syncId.value);
             }
         }
 
@@ -322,6 +333,7 @@ createApp({
             if (code && code.trim().startsWith('sync-')) {
                 syncId.value = code.trim();
                 localStorage.setItem('f_sync_id', syncId.value);
+                syncError.value = ''; // 重置错误，尝试用新码连接
                 pullFromCloud().then(() => alert("成功加入家庭云端！数据已实时更新。"));
             } else if (code) {
                 alert("格式不正确，请重新获取。");
@@ -482,7 +494,7 @@ createApp({
             tasks, dishes, menuSelections, weekDays, monthDetails, currentMonthName,
             filteredTasks, sortedTasks, showTaskModal, newTaskContent, newTaskExecutors,
             newDishName, newDishCategory, newDishImage, filteredDishes, currentSelectedDishIds, currentSelectedDishes,
-            syncId, isSyncing, copySyncId, promptSyncId, forceToEditMenu, deleteDish,
+            syncId, isSyncing, syncError, copySyncId, promptSyncId, forceToEditMenu, deleteDish, showNetworkError,
             switchView, selectDate, toggleCalendar, goHome, prevMonth, nextMonth,
             toggleTaskStatus, deleteTask, toggleExecutorSelection, submitTask,
             toggleDishSelection, saveMenuSelection, handleImageUpload, submitNewDish
