@@ -20,7 +20,7 @@
     <div class="bg-gray-900 text-white text-[11px] px-4 py-2.5 flex justify-between items-center z-50 shrink-0 shadow-sm">
         <div class="flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full" :class="isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'"></span>
-            <span class="font-mono text-gray-300">同步码: {{ syncId || '正在同步空间...' }}</span>
+            <span class="font-mono text-gray-300">同步码: {{ syncId || '正在连接云空间...' }}</span>
         </div>
         <div class="flex gap-2">
             <button @click="copySyncId" class="bg-orange-500 px-2 py-0.5 rounded text-white active:scale-95">分享家人</button>
@@ -142,10 +142,10 @@
 
         <div class="flex-1 overflow-y-auto p-4 pb-24">
             <div class="grid grid-cols-2 gap-3">
-                <div v-for="dish in filteredDishes" :key="dish.id" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 flex flex-col relative group">
+                <div v-for="dish in filteredDishes" :key="dish.id" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 flex flex-col relative">
                     
                     <!-- 右上角小删除按钮 -->
-                    <button @click.stop="deleteDish(dish.id)" class="absolute top-2 right-2 bg-black/40 hover:bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center transition-colors z-30">✕</button>
+                    <button @click.stop="deleteDish(dish.id)" class="absolute top-2 right-2 bg-black/40 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center z-30">✕</button>
                     
                     <img :src="dish.image" class="w-full h-24 object-cover bg-gray-100">
                     <div class="p-3 flex items-center justify-between gap-1 flex-1">
@@ -230,11 +230,10 @@ createApp({
         const activeCategory = ref('荤菜');
         const categories = ['荤菜', '素菜', '凉菜', '甜点', '早餐', '汤'];
 
-        // 云同步标识
         const syncId = ref(localStorage.getItem('f_sync_id') || '');
         const isSyncing = ref(false);
 
-        // 高级氛围感女性头像
+        // 氛围感女性头像
         const avatarMap = {
             '阿悦': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=150&q=80',
             '阿冰': 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80'
@@ -248,7 +247,7 @@ createApp({
         ]);
         const menuSelections = ref({});
 
-        // --- 核心网络云端实时同步架构 ---
+        // --- 云端网络同步架构 ---
         async function initCloudSync() {
             if (!syncId.value) {
                 try {
@@ -262,10 +261,10 @@ createApp({
                         syncId.value = 'sync-' + resData.id;
                         localStorage.setItem('f_sync_id', syncId.value);
                     }
-                } catch(e) { console.error("网络初始化失败，正在重试...", e); }
+                } catch(e) { console.error("网络初始化失败", e); }
             }
             pullFromCloud();
-            setInterval(pullFromCloud, 5000); // 5秒高频自动同步
+            setInterval(pullFromCloud, 5000);
         }
 
         async function pullFromCloud() {
@@ -280,7 +279,7 @@ createApp({
                     dishes.value = cloud.data.dishes || [];
                     menuSelections.value = cloud.data.menuSelections || {};
                 }
-            } catch (e) { console.log("云端拉取中..."); }
+            } catch (e) { console.log("云数据对齐中..."); }
         }
 
         async function pushToCloud() {
@@ -297,24 +296,38 @@ createApp({
             finally { isSyncing.value = false; }
         }
 
+        // 双层保险复制函数实现：防止非HTTPS或微信浏览器假死
         function copySyncId() {
-            if(!syncId.value) return;
-            navigator.clipboard.writeText(syncId.value);
-            alert(`专属同步码已复制：\n${syncId.value}\n\n发送给家人，让他们在网页右上角点击“绑定家人”填入即可连通！`);
-        }
-
-        function promptSyncId() {
-            const code = prompt("请输入家人发送给您的家庭同步码(以 sync- 开头)：");
-            if (code && code.startsWith('sync-')) {
-                syncId.value = code.trim();
-                localStorage.setItem('f_sync_id', syncId.value);
-                pullFromCloud().then(() => alert("绑定成功！数据已全端实时对齐。"));
-            } else if (code) {
-                alert("同步码不正确，请重新获取。");
+            if(!syncId.value || syncId.value.includes('正在')) {
+                alert('家庭同步空间正在创建中，请稍微等待 3 秒再点击哦！');
+                return;
+            }
+            
+            // 尝试标准的剪贴板 API 复制
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(syncId.value).then(() => {
+                    alert(`专属同步码已自动复制：\n${syncId.value}\n\n您可以去微信直接粘贴发送给家人了！`);
+                }).catch(() => {
+                    // 降级保护：如果自动复制因权限被浏览器拦截
+                    prompt("自动复制失败（浏览器安全限制），请长按下方文字手动复制发送给家人：", syncId.value);
+                });
+            } else {
+                // 环境降级保护：如果浏览器不支持复制API（如非HTTPS环境或旧版webview）
+                prompt("请长按下方文字手动复制同步码发送给家人：", syncId.value);
             }
         }
 
-        // --- 中间编辑表单暂存 ---
+        function promptSyncId() {
+            const code = prompt("请输入家人发给您的同步码(格式为 sync-xxx)：");
+            if (code && code.trim().startsWith('sync-')) {
+                syncId.value = code.trim();
+                localStorage.setItem('f_sync_id', syncId.value);
+                pullFromCloud().then(() => alert("成功加入家庭云端！数据已实时更新。"));
+            } else if (code) {
+                alert("格式不正确，请重新获取。");
+            }
+        }
+
         const showTaskModal = ref(false);
         const newTaskContent = ref('');
         const newTaskExecutors = ref([]);
@@ -400,11 +413,9 @@ createApp({
             pushToCloud();
         }
         
-        // 核心新增：彻底删除单个菜品逻辑
         function deleteDish(id) {
-            if (confirm('确认删除这道菜吗？删除后其他人也将无法选择。')) {
+            if (confirm('确认彻底删除这道菜品吗？')) {
                 dishes.value = dishes.value.filter(d => d.id !== id);
-                // 联动清理各日期的已选记录
                 for (const date in menuSelections.value) {
                     menuSelections.value[date] = menuSelections.value[date].filter(dishId => dishId !== id);
                 }
