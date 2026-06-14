@@ -10,38 +10,60 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background-color: #f7f7f7; -webkit-tap-highlight-color: transparent; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* 环形全局加载动画 */
+        .loading-spinner {
+            border: 3px solid rgba(255, 149, 0, 0.1);
+            border-radius: 50%;
+            border-top: 3px solid #FF9500;
+            width: 28px;
+            height: 28px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800">
 
 <div id="app" class="max-w-md mx-auto min-h-screen bg-[#F7F7F7] shadow-lg flex flex-col relative pb-6 select-none">
     
-    <!-- ==================== 顶部实时云同步控制台 ==================== -->
-    <div class="bg-gray-900 text-white text-[11px] px-4 py-2.5 flex justify-between items-center z-50 shrink-0 shadow-sm">
+    <!-- ==================== 全局加载遮罩 (Loading) ==================== -->
+    <div v-if="globalLoading" class="fixed inset-0 bg-white/70 flex items-center justify-center z-50 animate-fade-in">
+        <div class="flex flex-col items-center gap-2">
+            <div class="loading-spinner"></div>
+            <span class="text-xs text-orange-500 font-medium tracking-wide">正在加载中...</span>
+        </div>
+    </div>
+
+    <!-- ==================== 顶部实时口令同步控制台 ==================== -->
+    <div class="bg-gray-900 text-white text-[11px] px-4 py-2.5 flex justify-between items-center z-40 shrink-0 shadow-sm">
         <div class="flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full" :class="isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'"></span>
-            <span class="font-mono text-gray-300">同步码: {{ syncId || '正在同步空间...' }}</span>
+            <span class="w-2 h-2 rounded-full bg-green-400"></span>
+            <span class="font-mono text-gray-300">模式: 📱 微信口令同步</span>
         </div>
         <div class="flex gap-2">
-            <button @click="copySyncId" class="bg-orange-500 px-2 py-0.5 rounded text-white active:scale-95">分享家人</button>
-            <button @click="promptSyncId" class="bg-gray-700 px-2 py-0.5 rounded text-gray-200 active:scale-95">绑定家人</button>
+            <button @click="exportData" class="bg-orange-500 px-2 py-1 rounded text-white font-medium active:scale-95">📤 发送给家人</button>
+            <button @click="importData" class="bg-gray-700 px-2 py-1 rounded text-gray-200 font-medium active:scale-95">📥 接收自家人</button>
         </div>
     </div>
 
     <!-- ==================== 模块 0：主页大厅导航 ==================== -->
-    <div v-if="currentView === 'home'" class="flex-1 flex flex-col justify-center items-center gap-12 p-6">
+    <div v-if="currentView === 'home'" class="flex-1 flex flex-col justify-center items-center gap-10 p-6">
         <div @click="switchView('tasks')" class="flex flex-col items-center cursor-pointer active:scale-95 transition-transform">
-            <div class="w-36 h-36 bg-white rounded-full shadow-md flex items-center justify-center p-6 border border-gray-100">
-                <span class="text-5xl">🧺</span>
+            <div class="w-44 h-44 bg-white rounded-2xl shadow-md flex items-center justify-center overflow-hidden border border-gray-100">
+                <img src="Rectangle 1.png" class="w-full h-full object-cover">
             </div>
-            <span class="text-xl font-bold mt-4 tracking-wide text-gray-900">家庭任务</span>
+            <span class="text-lg font-bold mt-3 tracking-wide text-gray-900">家庭任务</span>
         </div>
 
         <div @click="switchView('menu_home')" class="flex flex-col items-center cursor-pointer active:scale-95 transition-transform">
-            <div class="w-36 h-36 bg-white rounded-full shadow-md flex items-center justify-center p-6 border border-gray-100">
-                <span class="text-5xl">🍗</span>
+            <div class="w-44 h-44 bg-white rounded-2xl shadow-md flex items-center justify-center overflow-hidden border border-gray-100">
+                <img src="Rectangle 2.png" class="w-full h-full object-cover">
             </div>
-            <span class="text-xl font-bold mt-4 tracking-wide text-gray-900">家庭菜单</span>
+            <span class="text-lg font-bold mt-3 tracking-wide text-gray-900">家庭菜单</span>
         </div>
     </div>
 
@@ -56,7 +78,7 @@
             <div class="w-10"></div>
         </div>
 
-        <!-- 状态一：折叠周视图 -->
+        <!-- 折叠周视图 -->
         <div v-if="!isCalendarExpanded" class="flex justify-between text-center px-1">
             <div v-for="day in weekDays" :key="day.dateString" @click="selectDate(day.dateString)"
                  class="flex flex-col items-center w-10 py-1 rounded-full cursor-pointer"
@@ -66,7 +88,7 @@
             </div>
         </div>
 
-        <!-- 状态二：展开月视图 -->
+        <!-- 展开月视图 -->
         <div v-else class="space-y-2">
             <div class="flex justify-between items-center px-4 text-xs opacity-80">
                 <button @click.stop="prevMonth">◀ 上个月</button>
@@ -95,9 +117,10 @@
         <h3 class="text-sm font-bold text-gray-500 px-1">家庭任务</h3>
 
         <div class="space-y-3">
-            <div v-if="filteredTasks.length === 0" class="text-center text-gray-400 py-12 text-xs">当前日期下还没有安排任务哦 ~</div>
+            <div v-if="sortedTasks.length === 0" class="text-center text-gray-400 py-12 text-xs">当前日期下还没有安排任务哦 ~</div>
             
-            <div v-for="task in sortedTasks" :key="task.id" class="bg-white p-4 rounded-2xl shadow-sm flex items-center justify-between border border-gray-100">
+            <!-- 混合有序任务列表 -->
+            <div v-for="task in sortedTasks" :key="task.id" class="bg-white p-4 rounded-2xl shadow-sm flex items-center justify-between border border-gray-100 transition-all">
                 <div class="flex items-center gap-3 flex-1 min-w-0">
                     <input type="checkbox" :checked="task.completed" @change="toggleTaskStatus(task.id)" class="w-5 h-5 accent-[#FF9500] rounded shrink-0 cursor-pointer">
                     <span class="text-base truncate" :class="task.completed ? 'line-through text-gray-400' : 'text-gray-800'">{{ task.content }}</span>
@@ -112,7 +135,7 @@
         </div>
     </div>
 
-    <!-- 弹窗：添加任务编辑弹窗 -->
+    <!-- 弹窗：添加任务 -->
     <div v-if="showTaskModal" class="fixed inset-0 bg-black/40 flex items-end justify-center z-50" @click.self="showTaskModal = false">
         <div class="bg-white w-full max-w-md rounded-t-[24px] p-6 space-y-6 pb-8">
             <div class="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-3">
@@ -136,17 +159,15 @@
 
     <!-- ==================== 模块 2：家庭菜单 - 选择菜品点单页 ==================== -->
     <div v-if="currentView === 'menu_home'" class="flex-1 flex flex-col min-h-0 relative">
-        <div class="flex gap-4 px-4 py-3 bg-white border-b border-gray-100 overflow-x-auto no-scrollbar shrink-0 text-sm font-medium">
-            <span v-for="tab in categories" :key="tab" @click="activeCategory = tab" class="pb-1 cursor-pointer whitespace-nowrap" :class="activeCategory === tab ? 'text-[#FF9500] border-b-2 border-[#FF9500] font-bold' : 'text-gray-500'">{{ tab }}</span>
+        <!-- UI优化1：Tab字号增加（text-base）、间距增加（gap-7, px-6） -->
+        <div class="flex gap-7 px-6 py-4 bg-white border-b border-gray-100 overflow-x-auto no-scrollbar shrink-0 text-base font-bold">
+            <span v-for="tab in categories" :key="tab" @click="changeCategory(tab)" class="pb-1 cursor-pointer whitespace-nowrap transition-colors" :class="activeCategory === tab ? 'text-[#FF9500] border-b-3 border-[#FF9500]' : 'text-gray-400'">{{ tab }}</span>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-4 pb-24">
+        <div class="flex-1 overflow-y-auto p-4 pb-32">
             <div class="grid grid-cols-2 gap-3">
-                <div v-for="dish in filteredDishes" :key="dish.id" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 flex flex-col relative group">
-                    
-                    <!-- 右上角小删除按钮 -->
-                    <button @click.stop="deleteDish(dish.id)" class="absolute top-2 right-2 bg-black/40 hover:bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center transition-colors z-30">✕</button>
-                    
+                <div v-for="dish in filteredDishes" :key="dish.id" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 flex flex-col relative">
+                    <button @click.stop="deleteDish(dish.id)" class="absolute top-2 right-2 bg-black/40 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center z-30">✕</button>
                     <img :src="dish.image" class="w-full h-24 object-cover bg-gray-100">
                     <div class="p-3 flex items-center justify-between gap-1 flex-1">
                         <span class="text-xs font-bold text-gray-800 truncate">{{ dish.name }}</span>
@@ -159,17 +180,20 @@
             </div>
         </div>
 
-        <!-- 悬浮按钮：添加新菜品 -->
-        <button @click="switchView('menu_add')" class="absolute right-5 bottom-20 bg-orange-500 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-2xl font-bold z-20 active:scale-95 transition-transform">＋</button>
+        <!-- 添加新菜品悬浮按钮 -->
+        <button @click="switchView('menu_add')" class="absolute right-5 bottom-28 bg-orange-500 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-2xl font-bold z-20 active:scale-95 transition-transform">＋</button>
 
-        <!-- 底部通栏悬浮确认栏 -->
-        <div class="absolute bottom-3 left-4 right-4 bg-white rounded-full shadow-md px-4 py-2 flex items-center justify-between border border-gray-100 z-30">
-            <div class="flex items-center gap-1.5">
-                <span class="text-xl">🐶</span>
-                <span class="text-xs font-bold text-gray-800">今天想吃</span>
-                <span v-if="currentSelectedDishIds.length > 0" class="bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold min-w-4 text-center">{{ currentSelectedDishIds.length }}</span>
+        <!-- UI优化2：悬浮框高度增加 (h-20)，确定按钮加大加大 (px-8 py-2 text-sm) -->
+        <div class="absolute bottom-4 left-4 right-4 bg-white rounded-2xl shadow-xl h-20 px-5 flex items-center justify-between border border-gray-100 z-30">
+            <div class="flex items-center gap-2.5">
+                <!-- 绑定用户提供的图6文件 -->
+                <img src="饿了 1.png" class="w-7 h-7 object-contain">
+                <div class="flex flex-col">
+                    <span class="text-xs font-black text-gray-800">今天想吃</span>
+                    <span class="text-[10px] text-gray-400">已选共 {{ currentSelectedDishIds.length }} 道菜品</span>
+                </div>
             </div>
-            <button @click="saveMenuSelection" class="bg-white border border-gray-200 text-gray-700 px-5 py-1 rounded-full text-xs font-medium active:bg-gray-50">确定</button>
+            <button @click="saveMenuSelection" class="bg-orange-500 text-white px-8 py-2 rounded-full text-sm font-bold shadow-sm active:bg-orange-600 transition-colors">确定</button>
         </div>
     </div>
 
@@ -198,7 +222,6 @@
     <div v-if="currentView === 'menu_add'" class="flex-1 bg-white flex flex-col p-4 animate-fade-in">
         <div class="flex items-center mb-6 shrink-0"><button @click="switchView('menu_home')" class="text-gray-500 text-sm">〈 返回</button></div>
         <div class="flex-1 space-y-6 overflow-y-auto pb-4">
-            <!-- 上传框 -->
             <div @click="$refs.fileInput.click()" class="w-full aspect-video bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 flex items-center justify-center cursor-pointer overflow-hidden relative">
                 <img v-if="newDishImage" :src="newDishImage" class="w-full h-full object-cover">
                 <span v-else class="text-3xl text-gray-300 font-light">＋</span>
@@ -220,7 +243,7 @@
 </div>
 
 <script>
-const { createApp, ref, computed, onMounted, watch } = Vue;
+const { createApp, ref, computed } = Vue;
 
 createApp({
     setup() {
@@ -229,92 +252,146 @@ createApp({
         const isCalendarExpanded = ref(false);
         const activeCategory = ref('荤菜');
         const categories = ['荤菜', '素菜', '凉菜', '甜点', '早餐', '汤'];
+        const globalLoading = ref(false); // 全局 Loading 状态
 
-        // 云同步标识
-        const syncId = ref(localStorage.getItem('f_sync_id') || '');
-        const isSyncing = ref(false);
-
-        // 高级氛围感女性头像
+        // UI优化3：绑定指定的固定本地文件头像
         const avatarMap = {
-            '阿悦': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=150&q=80',
-            '阿冰': 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80'
+            '阿悦': 'image_626f02.jpg',
+            '阿冰': 'ea0062cc449cac7e1b1f441484466a22.jpg'
         };
-        const tasks = ref([]);
-        const dishes = ref([
-            { id: 1, name: '红烧肉', category: '荤菜', image: 'https://images.unsplash.com/photo-1603052875302-d376b7c0638a?auto=format&fit=crop&w=200&q=80' },
-            { id: 2, name: '洋葱炒鸡腿肉', category: '荤菜', image: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?auto=format&fit=crop&w=200&q=80' },
-            { id: 3, name: '豆角炒鸡蛋', category: '荤菜', image: 'https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=200&q=80' },
-            { id: 4, name: '葱油手撕鸡', category: '荤菜', image: 'https://images.unsplash.com/photo-1518492104633-130d0cc84637?auto=format&fit=crop&w=200&q=80' }
+
+        // 从本地存储读取或初始化数据
+        const tasks = ref(JSON.parse(localStorage.getItem('local_tasks')) || []);
+        const dishes = ref(JSON.parse(localStorage.getItem('local_dishes')) || [
+            { id: 1, name: '红烧肉', category: '荤菜', image: '52725fcb5770c2786f8572cbc0a27a90.jpg' },
+            { id: 2, name: '洋葱炒鸡腿肉', category: '荤菜', image: '52725fcb5770c2786f8572cbc0a27a90.jpg' },
+            { id: 3, name: '豆角炒鸡蛋', category: '荤菜', image: '52725fcb5770c2786f8572cbc0a27a90.jpg' },
+            { id: 4, name: '葱油手撕鸡', category: '荤菜', image: '52725fcb5770c2786f8572cbc0a27a90.jpg' }
         ]);
-        const menuSelections = ref({});
+        const menuSelections = ref(JSON.parse(localStorage.getItem('local_menu_selections')) || {});
 
-        // --- 核心网络云端实时同步架构 ---
-        async function initCloudSync() {
-            if (!syncId.value) {
-                try {
-                    const res = await fetch('https://api.restfulapi.dev/objects', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: "FamilySyncSpace", data: { tasks: [], dishes: dishes.value, menuSelections: {} } })
-                    });
-                    const resData = await res.json();
-                    if(resData.id) {
-                        syncId.value = 'sync-' + resData.id;
-                        localStorage.setItem('f_sync_id', syncId.value);
-                    }
-                } catch(e) { console.error("网络初始化失败，正在重试...", e); }
-            }
-            pullFromCloud();
-            setInterval(pullFromCloud, 5000); // 5秒高频自动同步
+        function saveToLocal() {
+            localStorage.setItem('local_tasks', JSON.stringify(tasks.value));
+            localStorage.setItem('local_dishes', JSON.stringify(dishes.value));
+            localStorage.setItem('local_menu_selections', JSON.stringify(menuSelections.value));
         }
 
-        async function pullFromCloud() {
-            if (!syncId.value || isSyncing.value) return;
-            const cleanId = syncId.value.replace('sync-', '');
-            try {
-                const res = await fetch(`https://api.restfulapi.dev/objects/${cleanId}`);
-                if (!res.ok) return;
-                const cloud = await res.json();
-                if (cloud && cloud.data) {
-                    tasks.value = cloud.data.tasks || [];
-                    dishes.value = cloud.data.dishes || [];
-                    menuSelections.value = cloud.data.menuSelections || {};
+        // ==================== 核心功能：高级混合排序 ====================
+        // 未完成展示在上面，已完成的在下面。并且最新完成的任务（completedAt 越大）在已完成列表中越靠前
+        const sortedTasks = computed(() => {
+            const dayTasks = tasks.value.filter(t => t.date === selectedDate.value);
+            
+            const uncompleted = dayTasks.filter(t => !t.completed).sort((a, b) => b.id - a.id); // 未完成按创建倒序
+            const completed = dayTasks.filter(t => t.completed).sort((a, b) => {
+                // 如果有完成时间戳，按完成时间倒序（最新完成的在最前）
+                const timeA = a.completedAt || 0;
+                const timeB = b.completedAt || 0;
+                return timeB - timeA;
+            });
+            
+            return [...uncompleted, ...completed];
+        });
+
+        function toggleTaskStatus(id) {
+            const t = tasks.value.find(task => task.id === id);
+            if (t) { 
+                t.completed = !t.completed; 
+                // 记录或清除完成时间戳
+                t.completedAt = t.completed ? Date.now() : null;
+                saveToLocal(); 
+            }
+        }
+
+        // ==================== 触发 Loading 效果的操作 ====================
+        function triggerLoading(callback) {
+            globalLoading.value = true;
+            setTimeout(() => {
+                callback();
+                globalLoading.value = false;
+            }, 350); // 350ms 的舒适微动画延迟
+        }
+
+        function changeCategory(tab) {
+            triggerLoading(() => {
+                activeCategory.value = tab;
+            });
+        }
+
+        function selectDate(dateStr) {
+            triggerLoading(() => {
+                selectedDate.value = dateStr;
+                if (currentView.value === 'menu_view' || currentView.value === 'menu_home') {
+                    currentView.value = currentSelectedDishIds.value.length > 0 ? 'menu_view' : 'menu_home';
                 }
-            } catch (e) { console.log("云端拉取中..."); }
+            });
         }
 
-        async function pushToCloud() {
-            if (!syncId.value) return;
-            isSyncing.value = true;
-            const cleanId = syncId.value.replace('sync-', '');
+        function prevMonth() {
+            triggerLoading(() => {
+                const d = new Date(selectedDate.value);
+                d.setMonth(d.getMonth() - 1);
+                selectedDate.value = d.toISOString().split('T')[0];
+            });
+        }
+
+        function nextMonth() {
+            triggerLoading(() => {
+                const d = new Date(selectedDate.value);
+                d.setMonth(d.getMonth() + 1);
+                selectedDate.value = d.toISOString().split('T')[0];
+            });
+        }
+
+        // ==================== 微信口令同步系统 ====================
+        function exportData() {
             try {
-                await fetch(`https://api.restfulapi.dev/objects/${cleanId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: "FamilySyncSpace", data: { tasks: tasks.value, dishes: dishes.value, menuSelections: menuSelections.value } })
+                const cleanDishes = dishes.value.map(d => {
+                    return { id: d.id, name: d.name, category: d.category, image: d.image.startsWith('data:') ? '' : d.image };
                 });
-            } catch (e) { console.error("同步失败", e); }
-            finally { isSyncing.value = false; }
+                const packet = { t: tasks.value, d: cleanDishes, m: menuSelections.value };
+                const jsonStr = encodeURIComponent(JSON.stringify(packet));
+                const textCode = btoa(jsonStr);
+                const finalCommand = `✨我们的共享小家暗号✨\n${textCode}\n——复制整段文字，打开小家网页点击【接收自家人】即可同步数据！`;
+                
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(finalCommand).then(() => {
+                        alert("🎉 数据打包成功！最新家庭暗号已自动复制。直接去微信粘贴发给家人吧！");
+                    }).catch(() => {
+                        prompt("自动复制被拦截，请全选并复制下方框内的完整暗号：", finalCommand);
+                    });
+                } else {
+                    prompt("请全选并复制下方框内的完整暗号：", finalCommand);
+                }
+            } catch(e) { alert("生成口令失败: " + e.message); }
         }
 
-        function copySyncId() {
-            if(!syncId.value) return;
-            navigator.clipboard.writeText(syncId.value);
-            alert(`专属同步码已复制：\n${syncId.value}\n\n发送给家人，让他们在网页右上角点击“绑定家人”填入即可连通！`);
+        function importData() {
+            const rawInput = prompt("请在这里粘贴家人发给您的微信完整暗号：");
+            if (!rawInput) return;
+            try {
+                const match = rawInput.match(/[A-Za-z0-9+/=]{10,}/);
+                if (!match) {
+                    alert("⚠️ 格式错误！没有在里面找到有效暗号。");
+                    return;
+                }
+                const base64Code = match[0];
+                const decodedStr = decodeURIComponent(atob(base64Code));
+                const packet = JSON.parse(decodedStr);
+                
+                if (packet && packet.t && packet.d && packet.m) {
+                    tasks.value = packet.t;
+                    dishes.value = packet.d.map(d => {
+                        if (!d.image) d.image = '52725fcb5770c2786f8572cbc0a27a90.jpg';
+                        return d;
+                    });
+                    menuSelections.value = packet.m;
+                    saveToLocal();
+                    alert("✨ 同步成功！小家数据已对齐。");
+                    location.reload();
+                }
+            } catch(e) { alert("导入失败，暗号损坏。原因: " + e.message); }
         }
 
-        function promptSyncId() {
-            const code = prompt("请输入家人发送给您的家庭同步码(以 sync- 开头)：");
-            if (code && code.startsWith('sync-')) {
-                syncId.value = code.trim();
-                localStorage.setItem('f_sync_id', syncId.value);
-                pullFromCloud().then(() => alert("绑定成功！数据已全端实时对齐。"));
-            } else if (code) {
-                alert("同步码不正确，请重新获取。");
-            }
-        }
-
-        // --- 中间编辑表单暂存 ---
         const showTaskModal = ref(false);
         const newTaskContent = ref('');
         const newTaskExecutors = ref([]);
@@ -322,14 +399,14 @@ createApp({
         const newDishCategory = ref('');
         const newDishImage = ref('');
 
-        const currentMonthName = computed(() => new Date(selectedDate.value).toLocaleString('en-US', { month: 'long' }));
+        const currentMonthName = computed(() => new Date(selectedDate.value).toLocaleString('zh-CN', { month: 'long' }));
 
         const weekDays = computed(() => {
             const current = new Date(selectedDate.value);
             const start = new Date(current);
             start.setDate(current.getDate() - current.getDay());
             const days = [];
-            const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const names = ['日', '一', '二', '三', '四', '五', '六'];
             for (let i = 0; i < 7; i++) {
                 const d = new Date(start);
                 d.setDate(start.getDate() + i);
@@ -349,21 +426,9 @@ createApp({
             return { leadingEmptyDays: firstDay.getDay(), days };
         });
 
-        const filteredTasks = computed(() => tasks.value.filter(t => t.date === selectedDate.value));
-        const sortedTasks = computed(() => {
-            return [...filteredTasks.value].sort((a, b) => {
-                if (a.completed !== b.completed) return a.completed ? -1 : 1;
-                return b.id - a.id;
-            });
-        });
-
-        function toggleTaskStatus(id) {
-            const t = tasks.value.find(task => task.id === id);
-            if (t) { t.completed = !t.completed; pushToCloud(); }
-        }
         function deleteTask(id) {
             tasks.value = tasks.value.filter(t => t.id !== id);
-            pushToCloud();
+            saveToLocal();
         }
         function toggleExecutorSelection(name) {
             const idx = newTaskExecutors.value.indexOf(name);
@@ -377,12 +442,13 @@ createApp({
                 date: selectedDate.value,
                 content: newTaskContent.value,
                 executors: [...newTaskExecutors.value],
-                completed: false
+                completed: false,
+                completedAt: null
             });
             newTaskContent.value = '';
             newTaskExecutors.value = [];
             showTaskModal.value = false;
-            pushToCloud();
+            saveToLocal();
         }
 
         const filteredDishes = computed(() => {
@@ -397,18 +463,16 @@ createApp({
             const idx = list.indexOf(id);
             if (idx > -1) list.splice(idx, 1);
             else list.push(id);
-            pushToCloud();
+            saveToLocal();
         }
         
-        // 核心新增：彻底删除单个菜品逻辑
         function deleteDish(id) {
-            if (confirm('确认删除这道菜吗？删除后其他人也将无法选择。')) {
+            if (confirm('确认彻底删除这道菜品吗？')) {
                 dishes.value = dishes.value.filter(d => d.id !== id);
-                // 联动清理各日期的已选记录
                 for (const date in menuSelections.value) {
                     menuSelections.value[date] = menuSelections.value[date].filter(dishId => dishId !== id);
                 }
-                pushToCloud();
+                saveToLocal();
             }
         }
 
@@ -437,7 +501,7 @@ createApp({
             newDishCategory.value = '';
             newDishImage.value = '';
             currentView.value = 'menu_home';
-            pushToCloud();
+            saveToLocal();
         }
 
         function switchView(view) {
@@ -445,39 +509,24 @@ createApp({
                 currentView.value = currentSelectedDishIds.value.length > 0 ? 'menu_view' : 'menu_home';
             } else { currentView.value = view; }
         }
-        function selectDate(dateStr) {
-            selectedDate.value = dateStr;
-            if (currentView.value === 'menu_view' || currentView.value === 'menu_home') {
-                currentView.value = currentSelectedDishIds.value.length > 0 ? 'menu_view' : 'menu_home';
-            }
-        }
         function toggleCalendar() { isCalendarExpanded.value = !isCalendarExpanded.value; }
         function goHome() { currentView.value = 'home'; isCalendarExpanded.value = false; }
-        function prevMonth() {
-            const d = new Date(selectedDate.value);
-            d.setMonth(d.getMonth() - 1);
-            selectedDate.value = d.toISOString().split('T')[0];
-        }
-        function nextMonth() {
-            const d = new Date(selectedDate.value);
-            d.setMonth(d.getMonth() + 1);
-            selectedDate.value = d.toISOString().split('T')[0];
-        }
-
-        onMounted(() => { initCloudSync(); });
 
         return {
-            currentView, selectedDate, isCalendarExpanded, activeCategory, categories, avatarMap,
+            currentView, selectedDate, isCalendarExpanded, activeCategory, categories, avatarMap, globalLoading,
             tasks, dishes, menuSelections, weekDays, monthDetails, currentMonthName,
-            filteredTasks, sortedTasks, showTaskModal, newTaskContent, newTaskExecutors,
+            sortedTasks, showTaskModal, newTaskContent, newTaskExecutors,
             newDishName, newDishCategory, newDishImage, filteredDishes, currentSelectedDishIds, currentSelectedDishes,
-            syncId, isSyncing, copySyncId, promptSyncId, forceToEditMenu, deleteDish,
+            exportData, importData, forceToEditMenu, deleteDish, changeCategory,
             switchView, selectDate, toggleCalendar, goHome, prevMonth, nextMonth,
             toggleTaskStatus, deleteTask, toggleExecutorSelection, submitTask,
             toggleDishSelection, saveMenuSelection, handleImageUpload, submitNewDish
         };
     }
 }).mount('#app');
+</script>
+</body>
+</html>
 </script>
 </body>
 </html>
